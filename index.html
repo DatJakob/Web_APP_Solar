@@ -51,6 +51,19 @@
           <span class="power-unit">W</span>
         </div>
       </section>
+
+      <section class="chart-panel" aria-live="polite">
+        <div class="chart-head">
+          <h2>Verlauf letzte 60 Sekunden</h2>
+          <p class="chart-subtitle" id="chartSummary">Warte auf Messwerte ...</p>
+        </div>
+        <div class="chart-legend" aria-hidden="true">
+          <span class="legend-item"><span class="legend-swatch legend-swatch-grid"></span>Netzbezug</span>
+          <span class="legend-item"><span class="legend-swatch legend-swatch-solar"></span>Solar</span>
+          <span class="legend-item"><span class="legend-swatch legend-swatch-load"></span>Verbrauch</span>
+        </div>
+        <canvas id="powerChart" height="260"></canvas>
+      </section>
     </main>
     <script src="app.js" defer></script>
   </body>

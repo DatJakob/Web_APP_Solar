@@ -148,6 +148,79 @@ body {
   color: var(--muted);
 }
 
+.chart-panel {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background:
+    radial-gradient(circle at top left, rgba(61, 156, 240, 0.15), transparent 35%),
+    linear-gradient(180deg, rgba(26, 35, 50, 0.95), rgba(15, 20, 25, 0.95));
+}
+
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.chart-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.chart-subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.legend-swatch {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  display: inline-block;
+}
+
+.legend-swatch-grid {
+  background: #58a6ff;
+}
+
+.legend-swatch-solar {
+  background: #f7b955;
+}
+
+.legend-swatch-load {
+  background: #7ee081;
+}
+
+#powerChart {
+  width: 100%;
+  height: 260px;
+  display: block;
+}
+
 .status-text {
   font-size: 1rem;
   color: var(--text);
@@ -190,4 +263,18 @@ body {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+@media (max-width: 640px) {
+  .power-value {
+    font-size: 2.75rem;
+  }
+
+  .power-unit {
+    font-size: 1.2rem;
+  }
+
+  .chart-panel {
+    padding: 1rem;
+  }
 }

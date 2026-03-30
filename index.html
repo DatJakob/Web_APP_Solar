@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shelly Status</title>
+    <meta name="theme-color" content="#0f1419" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Shelly Status" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icons/icon.svg" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="head">
+      <h1>Shelly Status</h1>
+      <p class="hint">Als Web-App installierbar. Nach dem ersten erfolgreichen Laden ist die Oberflache offline verfugbar.</p>
+      </header>
+
+      <form class="row" id="form" action="#" method="get">
+        <button type="button" id="btnConnect" style="flex: 1;">Start</button>
+      </form>
+
+      <p class="note" id="note" hidden></p>
+      <p class="err" id="err" hidden></p>
+
+      <section class="power-display" aria-live="polite">
+        <h2>Netzbezug Shelly 192.168.178.52</h2>
+        <div class="power-value">
+          <span id="powerValue">— —</span>
+          <span class="power-unit">W</span>
+        </div>
+      </section>
+
+      <section class="power-display" aria-live="polite">
+        <h2>Solar Shelly 192.168.178.53</h2>
+        <div class="power-value">
+          <span id="powerValue2">— —</span>
+          <span class="power-unit">W</span>
+        </div>
+      </section>
+
+      <section class="power-display" aria-live="polite">
+        <h2>Verbrauch (Netzbezug - Solar)</h2>
+        <div class="power-value">
+          <span id="powerValue3">— —</span>
+          <span class="power-unit">W</span>
+        </div>
+      </section>
+      <section class="power-display" aria-live="polite">
+        <h2>Status Shelly 53</h2>
+        <div class="status-text" id="powerStatus2">Noch nicht verbunden.</div>
+      </section>
+
+      <section class="out" aria-live="polite">
+        <h2 class="out-title">Debug</h2>
+        <pre class="json" id="out">Bereit.</pre>
+      </section>
+    </main>
+    <script src="app.js" defer></script>
+  </body>
+</html>

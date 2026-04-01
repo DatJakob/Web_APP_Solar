@@ -567,12 +567,29 @@ body {
 .history-head-actions {
   display: flex;
   gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 .history-import-btn {
   min-width: auto;
   min-height: 2.8rem;
   padding: 0.6rem 1rem;
+}
+
+.history-delete-all-btn {
+  border-color: rgba(203, 84, 104, 0.45);
+  color: #ffd9df;
+}
+
+.history-delete-all-btn:hover {
+  background: rgba(203, 84, 104, 0.16);
+}
+
+.history-storage-usage {
+  margin: 0;
+  color: #c6d7e5;
+  font-size: 0.9rem;
 }
 
 .chart-head {

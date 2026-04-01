@@ -14,6 +14,7 @@
   var form = document.getElementById("form");
   var btnConnect = document.getElementById("btnConnect");
   var btnImportJson = document.getElementById("btnImportJson");
+  var btnDeleteAllSessions = document.getElementById("btnDeleteAllSessions");
   var importJsonInput = document.getElementById("importJsonInput");
   var noteEl = document.getElementById("note");
   var errEl = document.getElementById("err");
@@ -34,6 +35,7 @@
   var storageMetaEl = document.getElementById("storageMeta");
   var historySessionsEl = document.getElementById("historySessions");
   var historyEmptyEl = document.getElementById("historyEmpty");
+  var historyStorageUsedEl = document.getElementById("historyStorageUsed");
   var tabButtons = Array.prototype.slice.call(document.querySelectorAll("[data-tab-target]"));
   var tabPanels = Array.prototype.slice.call(document.querySelectorAll("[data-tab-panel]"));
 
@@ -57,7 +59,26 @@
   var viewWindowStart = null;
   var viewDragging = false;
   var viewDragStartX = 0;
+  var viewDragStartY = 0;
   var viewDragStartWindow = 0;
+  var viewYMin = null;
+  var viewYMax = null;
+  var viewYDragStartMin = 0;
+  var viewYDragStartMax = 0;
+  var viewDragMode = "x";
+  var viewTouchPinching = false;
+  var viewTouchDragging = false;
+  var viewTouchDragMode = "x";
+  var viewTouchStartDistance = 0;
+  var viewTouchStartWindowMs = 0;
+  var viewTouchStartWindowStart = 0;
+  var viewTouchAnchorRatio = 0.5;
+  var viewTouchDragStartX = 0;
+  var viewTouchDragStartY = 0;
+  var viewTouchDragStartWindow = 0;
+  var viewTouchDragStartMin = 0;
+  var viewTouchDragStartMax = 0;
+  var VIEW_Y_CONTROL_ZONE_PX = 52;
 
   function appendNote(msg) {
     if (!msg || !noteEl) return;
@@ -185,6 +206,11 @@
     return (value / 1024).toFixed(1) + " KB";
   }
 
+  function updateHistoryStorageUsageUi(totalBytes) {
+    if (!historyStorageUsedEl) return;
+    historyStorageUsedEl.textContent = "Speicher gesamt: " + formatBytes(totalBytes || 0);
+  }
+
   function openHistoryDb() {
     if (!supportsIndexedDb()) return Promise.reject(new Error("IndexedDB wird nicht unterstuetzt."));
     if (historyDbPromise) return historyDbPromise;
@@ -308,7 +334,14 @@
             return (b.startedAt || 0) - (a.startedAt || 0);
           });
         };
-        transaction.oncomplete = function () { renderSessions(); resolve(sessionList); };
+        transaction.oncomplete = function () {
+          var totalBytes = sessionList.reduce(function (sum, session) {
+            return sum + Number(session.storageBytes || 0);
+          }, 0);
+          updateHistoryStorageUsageUi(totalBytes);
+          renderSessions();
+          resolve(sessionList);
+        };
         transaction.onerror = function () { reject(transaction.error || new Error("Sessions konnten nicht geladen werden.")); };
       });
     }).catch(function (err) {
@@ -390,9 +423,45 @@
     return start;
   }
 
+  function getTouchDistance(touchA, touchB) {
+    var dx = touchA.clientX - touchB.clientX;
+    var dy = touchA.clientY - touchB.clientY;
+    return Math.sqrt((dx * dx) + (dy * dy));
+  }
+
+  function getTouchCenterX(touchA, touchB) {
+    return (touchA.clientX + touchB.clientX) / 2;
+  }
+
+  function ensureViewYRangeInitialized() {
+    if (typeof viewYMin === "number" && typeof viewYMax === "number") return;
+    var autoMin = Infinity;
+    var autoMax = -Infinity;
+    selectedViewSamples.forEach(function (sample) {
+      autoMin = Math.min(autoMin, sample.netzbezug, sample.solar, sample.verbrauch);
+      autoMax = Math.max(autoMax, sample.netzbezug, sample.solar, sample.verbrauch);
+    });
+    if (!isFinite(autoMin) || !isFinite(autoMax) || autoMin === autoMax) {
+      autoMin = -100;
+      autoMax = 100;
+    }
+    var autoPadding = Math.max(10, (autoMax - autoMin) * 0.15);
+    viewYMin = Math.min(autoMin - autoPadding, 0);
+    viewYMax = Math.max(autoMax + autoPadding, 0);
+  }
+
+  function isInViewYControlZone(clientX) {
+    if (!viewChartCanvas) return false;
+    var rect = viewChartCanvas.getBoundingClientRect();
+    if (!rect.width) return false;
+    return (clientX - rect.left) <= VIEW_Y_CONTROL_ZONE_PX;
+  }
+
   function resetViewWindow() {
     var bounds = getViewBounds();
     viewWindowMs = HISTORY_WINDOW_MS;
+    viewYMin = null;
+    viewYMax = null;
     if (!bounds) {
       viewWindowStart = null;
       return;
@@ -417,6 +486,8 @@
     renderChartFromSamples(viewChartCanvas, selectedViewSamples, viewLegendLoadValueEl, viewLegendGridValueEl, viewLegendSolarValueEl, {
       startTime: viewWindowStart,
       endTime: viewWindowStart + viewWindowMs,
+      valueMin: viewYMin,
+      valueMax: viewYMax,
       xTickLabels: true
     });
   }
@@ -450,39 +521,67 @@
       return;
     }
 
-    var minValue = Infinity;
-    var maxValue = -Infinity;
+    var computedMinValue = Infinity;
+    var computedMaxValue = -Infinity;
     for (var i = 0; i < samples.length; i += 1) {
       var sample = samples[i];
-      minValue = Math.min(minValue, sample.netzbezug, sample.solar, sample.verbrauch);
-      maxValue = Math.max(maxValue, sample.netzbezug, sample.solar, sample.verbrauch);
+      computedMinValue = Math.min(computedMinValue, sample.netzbezug, sample.solar, sample.verbrauch);
+      computedMaxValue = Math.max(computedMaxValue, sample.netzbezug, sample.solar, sample.verbrauch);
     }
 
-    if (!isFinite(minValue) || !isFinite(maxValue)) {
-      minValue = 0;
-      maxValue = 1;
+    if (!isFinite(computedMinValue) || !isFinite(computedMaxValue)) {
+      computedMinValue = 0;
+      computedMaxValue = 1;
     }
-    if (minValue === maxValue) {
-      minValue -= 1;
-      maxValue += 1;
+    if (computedMinValue === computedMaxValue) {
+      computedMinValue -= 1;
+      computedMaxValue += 1;
     }
 
-    var paddingValue = Math.max(10, (maxValue - minValue) * 0.15);
-    minValue = Math.min(minValue - paddingValue, 0);
-    maxValue = Math.max(maxValue + paddingValue, 0);
+    var computedPaddingValue = Math.max(10, (computedMaxValue - computedMinValue) * 0.15);
+    computedMinValue = Math.min(computedMinValue - computedPaddingValue, 0);
+    computedMaxValue = Math.max(computedMaxValue + computedPaddingValue, 0);
 
-    var niceStep = getNiceStep((maxValue - minValue) / 4);
-    minValue = Math.floor(minValue / niceStep) * niceStep;
-    maxValue = Math.ceil(maxValue / niceStep) * niceStep;
-    if (minValue === maxValue) maxValue = minValue + niceStep;
+    var computedNiceStep = getNiceStep((computedMaxValue - computedMinValue) / 4);
+    computedMinValue = Math.floor(computedMinValue / computedNiceStep) * computedNiceStep;
+    computedMaxValue = Math.ceil(computedMaxValue / computedNiceStep) * computedNiceStep;
+    if (computedMinValue === computedMaxValue) computedMaxValue = computedMinValue + computedNiceStep;
+
+    var hasManualYRange = typeof options.valueMin === "number" && typeof options.valueMax === "number";
+    var minValue = hasManualYRange ? options.valueMin : computedMinValue;
+    var maxValue = hasManualYRange ? options.valueMax : computedMaxValue;
+    if (!isFinite(minValue) || !isFinite(maxValue) || minValue === maxValue) {
+      minValue = computedMinValue;
+      maxValue = computedMaxValue;
+      hasManualYRange = false;
+    }
+
+    var niceStep = getNiceStep((maxValue - minValue) / 6);
+    if (!hasManualYRange) {
+      minValue = Math.floor(minValue / niceStep) * niceStep;
+      maxValue = Math.ceil(maxValue / niceStep) * niceStep;
+      if (minValue === maxValue) maxValue = minValue + niceStep;
+    }
 
     var range = maxValue - minValue;
 
     ctx.save();
     ctx.translate(paddingLeft, paddingTop);
 
+    // Left control strip for Y-axis interactions (offset/range).
+    var yZoneWidth = Math.min(plotWidth * 0.22, Math.max(28, VIEW_Y_CONTROL_ZONE_PX * (window.devicePixelRatio || 1)));
+    ctx.fillStyle = "rgba(47, 124, 246, 0.08)";
+    ctx.fillRect(0, 0, yZoneWidth, plotHeight);
+    ctx.strokeStyle = "rgba(47, 124, 246, 0.32)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(yZoneWidth, 0);
+    ctx.lineTo(yZoneWidth, plotHeight);
+    ctx.stroke();
+
     var tickValues = [];
-    for (var tickValue = maxValue; tickValue >= minValue - (niceStep * 0.5); tickValue -= niceStep) {
+    var firstYTick = Math.ceil(minValue / niceStep) * niceStep;
+    for (var tickValue = firstYTick; tickValue <= maxValue + (niceStep * 0.5); tickValue += niceStep) {
       tickValues.push(tickValue);
     }
 
@@ -525,14 +624,14 @@
     drawSeriesForRange(ctx, plotWidth, plotHeight, samples, startTime, endTime, minValue, range, "#2f7cf6", "verbrauch");
 
     if (options.xTickLabels) {
-      var xTickCount = 4;
+      var xTickStep = Math.max(500, getNiceStep((endTime - startTime) / 6));
       ctx.strokeStyle = "rgba(139, 154, 171, 0.12)";
       ctx.fillStyle = "#8b9aab";
       ctx.textAlign = "center";
-      for (i = 0; i <= xTickCount; i += 1) {
-        var ratio = i / xTickCount;
-        var x = ratio * plotWidth;
-        var t = startTime + ((endTime - startTime) * ratio);
+      var firstXTick = Math.ceil(startTime / xTickStep) * xTickStep;
+      for (var t = firstXTick; t <= endTime + (xTickStep * 0.5); t += xTickStep) {
+        var x = ((t - startTime) / (endTime - startTime)) * plotWidth;
+        if (x < -1 || x > plotWidth + 1) continue;
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, plotHeight);
@@ -622,6 +721,31 @@
       transaction.onerror = function () { showError("Abschnitt konnte nicht geloescht werden."); };
     }).catch(function (err) {
       showError("Abschnitt konnte nicht geloescht werden: " + ((err && err.message) || String(err)));
+    });
+  }
+
+  function deleteAllSessions() {
+    if (!confirm("Wirklich alle gespeicherten Sessions und Messwerte loeschen?")) return;
+
+    openHistoryDb().then(function (db) {
+      var transaction = db.transaction([SESSIONS_STORE, SAMPLES_STORE], "readwrite");
+      transaction.objectStore(SESSIONS_STORE).clear();
+      transaction.objectStore(SAMPLES_STORE).clear();
+
+      transaction.oncomplete = function () {
+        currentSessionId = null;
+        selectedViewSamples = [];
+        resetViewWindow();
+        setViewSessionMeta(null, []);
+        renderViewChart();
+        updateHistoryStorageUsageUi(0);
+        loadStorageStats();
+        loadSessions();
+        showNote("Alle Sessions wurden geloescht.");
+      };
+      transaction.onerror = function () { showError("Alle Sessions konnten nicht geloescht werden."); };
+    }).catch(function (err) {
+      showError("Alle Sessions konnten nicht geloescht werden: " + ((err && err.message) || String(err)));
     });
   }
 
@@ -1209,6 +1333,12 @@
     });
   }
 
+  if (btnDeleteAllSessions) {
+    btnDeleteAllSessions.addEventListener("click", function () {
+      deleteAllSessions();
+    });
+  }
+
   window.addEventListener("beforeunload", function () {
     userClosed = true;
     if (chartRefreshIntervalId) {
@@ -1237,7 +1367,19 @@
       if (!bounds) return;
 
       var rect = viewChartCanvas.getBoundingClientRect();
+      var inYZone = isInViewYControlZone(event.clientX);
       var ratio = rect.width > 0 ? Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)) : 0.5;
+      if (inYZone) {
+        ensureViewYRangeInitialized();
+        var currentYRange = Math.max(1, viewYMax - viewYMin);
+        var yFactor = event.deltaY > 0 ? 1.12 : 0.88;
+        var nextYRange = Math.max(10, currentYRange * yFactor);
+        var centerY = (viewYMin + viewYMax) / 2;
+        viewYMin = centerY - (nextYRange / 2);
+        viewYMax = centerY + (nextYRange / 2);
+        renderViewChart();
+        return;
+      }
       var oldWindow = viewWindowMs;
       var factor = event.deltaY > 0 ? 1.2 : 0.8;
       var duration = Math.max(1, bounds.max - bounds.min);
@@ -1253,8 +1395,124 @@
     viewChartCanvas.addEventListener("mousedown", function (event) {
       if (event.button !== 0 || !selectedViewSamples.length) return;
       viewDragging = true;
+      viewDragMode = isInViewYControlZone(event.clientX) ? "y" : "x";
       viewDragStartX = event.clientX;
+      viewDragStartY = event.clientY;
       viewDragStartWindow = viewWindowStart || 0;
+      ensureViewYRangeInitialized();
+      viewYDragStartMin = viewYMin;
+      viewYDragStartMax = viewYMax;
+    });
+
+    viewChartCanvas.addEventListener("touchstart", function (event) {
+      if (!selectedViewSamples.length || !event.touches || !event.touches.length) return;
+      var bounds = getViewBounds();
+      if (!bounds) return;
+
+      if (event.touches.length === 1) {
+        event.preventDefault();
+        viewTouchPinching = false;
+        viewTouchDragging = true;
+        viewTouchDragMode = isInViewYControlZone(event.touches[0].clientX) ? "y" : "x";
+        viewTouchDragStartX = event.touches[0].clientX;
+        viewTouchDragStartY = event.touches[0].clientY;
+        viewTouchDragStartWindow = viewWindowStart === null ? (bounds.max - viewWindowMs) : viewWindowStart;
+        ensureViewYRangeInitialized();
+        viewTouchDragStartMin = viewYMin;
+        viewTouchDragStartMax = viewYMax;
+        return;
+      }
+
+      if (!selectedViewSamples.length || !event.touches || event.touches.length !== 2) return;
+      event.preventDefault();
+      viewTouchDragging = false;
+      var rect = viewChartCanvas.getBoundingClientRect();
+      var touchA = event.touches[0];
+      var touchB = event.touches[1];
+      var distance = getTouchDistance(touchA, touchB);
+      if (!isFinite(distance) || distance <= 0) return;
+
+      var centerX = getTouchCenterX(touchA, touchB);
+      var pinchInYZone = isInViewYControlZone(centerX);
+      viewTouchAnchorRatio = rect.width > 0 ? Math.min(1, Math.max(0, (centerX - rect.left) / rect.width)) : 0.5;
+      viewTouchDragMode = pinchInYZone ? "y" : "x";
+      if (pinchInYZone) {
+        ensureViewYRangeInitialized();
+        viewYDragStartMin = viewYMin;
+        viewYDragStartMax = viewYMax;
+      }
+      viewTouchPinching = true;
+      viewTouchStartDistance = distance;
+      viewTouchStartWindowMs = viewWindowMs;
+      viewTouchStartWindowStart = viewWindowStart === null ? bounds.max - viewWindowMs : viewWindowStart;
+    }, { passive: false });
+
+    viewChartCanvas.addEventListener("touchmove", function (event) {
+      if (viewTouchDragging && !viewTouchPinching && event.touches && event.touches.length === 1) {
+        event.preventDefault();
+        var bounds = getViewBounds();
+        if (!bounds) return;
+        var rect = viewChartCanvas.getBoundingClientRect();
+        if (viewTouchDragMode === "x" && rect.width > 0) {
+          var deltaX = event.touches[0].clientX - viewTouchDragStartX;
+          var msPerPixel = viewWindowMs / rect.width;
+          var nextWindow = viewTouchDragStartWindow - (deltaX * msPerPixel);
+          viewWindowStart = clampViewWindowStart(nextWindow, bounds.min, bounds.max, viewWindowMs);
+        }
+        if (viewTouchDragMode === "y" && rect.height > 0) {
+          ensureViewYRangeInitialized();
+          var deltaY = event.touches[0].clientY - viewTouchDragStartY;
+          var valueRange = Math.max(1, viewTouchDragStartMax - viewTouchDragStartMin);
+          var valuePerPixel = valueRange / rect.height;
+          var valueShift = deltaY * valuePerPixel;
+          var center = ((viewTouchDragStartMin + viewTouchDragStartMax) / 2) + valueShift;
+          viewYMin = center - (valueRange / 2);
+          viewYMax = center + (valueRange / 2);
+        }
+        renderViewChart();
+        return;
+      }
+
+      if (!viewTouchPinching || !selectedViewSamples.length || !event.touches || event.touches.length !== 2) return;
+      event.preventDefault();
+      var bounds = getViewBounds();
+      if (!bounds) return;
+
+      var distance = getTouchDistance(event.touches[0], event.touches[1]);
+      if (!isFinite(distance) || distance <= 0 || viewTouchStartDistance <= 0) return;
+
+      var pinchRatio = viewTouchStartDistance / distance;
+      if (viewTouchDragMode === "y") {
+        ensureViewYRangeInitialized();
+        var startRangeY = Math.max(1, viewYDragStartMax - viewYDragStartMin);
+        var newRangeY = Math.max(10, startRangeY * pinchRatio);
+        var centerY = (viewYDragStartMin + viewYDragStartMax) / 2;
+        viewYMin = centerY - (newRangeY / 2);
+        viewYMax = centerY + (newRangeY / 2);
+      } else {
+        var duration = Math.max(1, bounds.max - bounds.min);
+        var minWindow = 5000;
+        var maxWindow = Math.max(HISTORY_WINDOW_MS, duration);
+        var newWindow = Math.min(maxWindow, Math.max(minWindow, viewTouchStartWindowMs * pinchRatio));
+        var anchorTime = viewTouchStartWindowStart + (viewTouchStartWindowMs * viewTouchAnchorRatio);
+        viewWindowMs = newWindow;
+        viewWindowStart = clampViewWindowStart(anchorTime - (newWindow * viewTouchAnchorRatio), bounds.min, bounds.max, newWindow);
+      }
+      renderViewChart();
+    }, { passive: false });
+
+    viewChartCanvas.addEventListener("touchend", function () {
+      viewTouchDragging = false;
+      if (!viewTouchPinching) return;
+      viewTouchPinching = false;
+      viewTouchStartDistance = 0;
+    });
+
+    viewChartCanvas.addEventListener("touchcancel", function () {
+      viewTouchDragging = false;
+      if (!viewTouchPinching) return;
+      viewTouchPinching = false;
+      viewTouchStartDistance = 0;
     });
 
     window.addEventListener("mousemove", function (event) {
@@ -1262,11 +1520,22 @@
       var bounds = getViewBounds();
       if (!bounds) return;
       var rect = viewChartCanvas.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      var deltaX = event.clientX - viewDragStartX;
-      var msPerPixel = viewWindowMs / rect.width;
-      var nextWindow = viewDragStartWindow - (deltaX * msPerPixel);
-      viewWindowStart = clampViewWindowStart(nextWindow, bounds.min, bounds.max, viewWindowMs);
+      if (viewDragMode === "x") {
+        if (rect.width <= 0) return;
+        var deltaX = event.clientX - viewDragStartX;
+        var msPerPixel = viewWindowMs / rect.width;
+        var nextWindow = viewDragStartWindow - (deltaX * msPerPixel);
+        viewWindowStart = clampViewWindowStart(nextWindow, bounds.min, bounds.max, viewWindowMs);
+      } else if (rect.height > 0) {
+        ensureViewYRangeInitialized();
+        var deltaY = event.clientY - viewDragStartY;
+        var valueRange = Math.max(1, viewYDragStartMax - viewYDragStartMin);
+        var valuePerPixel = valueRange / rect.height;
+        var valueShift = deltaY * valuePerPixel;
+        var center = ((viewYDragStartMin + viewYDragStartMax) / 2) + valueShift;
+        viewYMin = center - (valueRange / 2);
+        viewYMax = center + (valueRange / 2);
+      }
       renderViewChart();
     });
 
@@ -1280,6 +1549,7 @@
   removeLegacyPwaArtifacts();
   setActiveTab("dashboard");
   updateStorageUi();
+  updateHistoryStorageUsageUi(0);
   setViewSessionMeta(null, []);
   resetViewWindow();
   renderViewChart();

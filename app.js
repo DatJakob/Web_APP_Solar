@@ -26,10 +26,14 @@
   var powerValueEl3 = document.getElementById("powerValue3");
   var powerEnergyValueEl3 = document.getElementById("powerEnergyValue3");
   var chartCanvas = document.getElementById("powerChart");
+  var liveChartResizeEl = document.getElementById("liveChartResize");
+  var liveChartHandleEl = document.getElementById("liveChartHandle");
   var legendLoadValueEl = document.getElementById("legendLoadValue");
   var legendGridValueEl = document.getElementById("legendGridValue");
   var legendSolarValueEl = document.getElementById("legendSolarValue");
   var viewChartCanvas = document.getElementById("viewChart");
+  var viewChartResizeEl = document.getElementById("viewChartResize");
+  var viewChartHandleEl = document.getElementById("viewChartHandle");
   var viewLegendLoadValueEl = document.getElementById("viewLegendLoadValue");
   var viewLegendGridValueEl = document.getElementById("viewLegendGridValue");
   var viewLegendSolarValueEl = document.getElementById("viewLegendSolarValue");
@@ -88,6 +92,14 @@
   var viewTouchDragStartMin = 0;
   var viewTouchDragStartMax = 0;
   var VIEW_Y_CONTROL_ZONE_PX = 52;
+  var liveChartResizing = false;
+  var liveChartStartY = 0;
+  var liveChartStartHeight = 0;
+  var LIVE_CHART_MIN_HEIGHT = 320;
+  var viewChartResizing = false;
+  var viewChartStartY = 0;
+  var viewChartStartHeight = 0;
+  var VIEW_CHART_MIN_HEIGHT = 320;
 
   function appendNote(msg) {
     if (!msg || !noteEl) return;
@@ -1348,6 +1360,38 @@
     });
   }
 
+  function clampLiveChartHeight(nextHeight) {
+    var maxHeight = Math.max(LIVE_CHART_MIN_HEIGHT, Math.round(window.innerHeight * 0.8));
+    return Math.min(maxHeight, Math.max(LIVE_CHART_MIN_HEIGHT, Math.round(nextHeight)));
+  }
+
+  function getLiveChartHeight() {
+    if (!liveChartResizeEl) return LIVE_CHART_MIN_HEIGHT;
+    return clampLiveChartHeight(liveChartResizeEl.getBoundingClientRect().height || LIVE_CHART_MIN_HEIGHT);
+  }
+
+  function setLiveChartHeight(nextHeight) {
+    if (!liveChartResizeEl) return;
+    liveChartResizeEl.style.height = clampLiveChartHeight(nextHeight) + "px";
+    renderChart();
+  }
+
+  function clampViewChartHeight(nextHeight) {
+    var maxHeight = Math.max(VIEW_CHART_MIN_HEIGHT, Math.round(window.innerHeight * 0.8));
+    return Math.min(maxHeight, Math.max(VIEW_CHART_MIN_HEIGHT, Math.round(nextHeight)));
+  }
+
+  function getViewChartHeight() {
+    if (!viewChartResizeEl) return VIEW_CHART_MIN_HEIGHT;
+    return clampViewChartHeight(viewChartResizeEl.getBoundingClientRect().height || VIEW_CHART_MIN_HEIGHT);
+  }
+
+  function setViewChartHeight(nextHeight) {
+    if (!viewChartResizeEl) return;
+    viewChartResizeEl.style.height = clampViewChartHeight(nextHeight) + "px";
+    renderViewChart();
+  }
+
   function recordHistoryPoint() {
     if (!currentSessionId) return;
 
@@ -1377,7 +1421,7 @@
 
   function httpBaseToWsRpcUrl(base) {
     var u = new URL(base);
-    return (u.protocol === "https:" ? "wss:" : "ws:") + "//" + u.host + "/rpc";
+    return "ws://" + u.host + "/rpc";
   }
   function applyMessage(text) {
     var obj;
@@ -1621,12 +1665,6 @@
     });
   }
 
-  function hintIfHttpsPage() {
-    if (location.protocol === "https:") {
-      showNote("Seite ueber HTTPS: ws:// zu Shelly kann blockiert werden. Seite lieber ueber http:// oeffnen.");
-    }
-  }
-
   function removeLegacyPwaArtifacts() {
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", function () {
@@ -1725,8 +1763,78 @@
 
   window.addEventListener("resize", renderChart);
   window.addEventListener("resize", function () {
+    if (liveChartResizeEl && liveChartResizeEl.style.height) {
+      liveChartResizeEl.style.height = clampLiveChartHeight(getLiveChartHeight()) + "px";
+    }
+    if (viewChartResizeEl && viewChartResizeEl.style.height) {
+      viewChartResizeEl.style.height = clampViewChartHeight(getViewChartHeight()) + "px";
+    }
     renderViewChart();
   });
+
+  if (liveChartHandleEl && liveChartResizeEl) {
+    liveChartHandleEl.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0 && event.pointerType !== "touch" && event.pointerType !== "pen") return;
+      event.preventDefault();
+      liveChartResizing = true;
+      liveChartStartY = event.clientY;
+      liveChartStartHeight = getLiveChartHeight();
+      if (liveChartHandleEl.setPointerCapture) {
+        try { liveChartHandleEl.setPointerCapture(event.pointerId); } catch (_) {}
+      }
+      document.body.style.userSelect = "none";
+    });
+
+    window.addEventListener("pointermove", function (event) {
+      if (!liveChartResizing) return;
+      event.preventDefault();
+      setLiveChartHeight(liveChartStartHeight + (event.clientY - liveChartStartY));
+    });
+
+    window.addEventListener("pointerup", function () {
+      if (!liveChartResizing) return;
+      liveChartResizing = false;
+      document.body.style.userSelect = "";
+    });
+
+    window.addEventListener("pointercancel", function () {
+      if (!liveChartResizing) return;
+      liveChartResizing = false;
+      document.body.style.userSelect = "";
+    });
+  }
+
+  if (viewChartHandleEl && viewChartResizeEl) {
+    viewChartHandleEl.addEventListener("pointerdown", function (event) {
+      if (event.button !== 0 && event.pointerType !== "touch" && event.pointerType !== "pen") return;
+      event.preventDefault();
+      viewChartResizing = true;
+      viewChartStartY = event.clientY;
+      viewChartStartHeight = getViewChartHeight();
+      if (viewChartHandleEl.setPointerCapture) {
+        try { viewChartHandleEl.setPointerCapture(event.pointerId); } catch (_) {}
+      }
+      document.body.style.userSelect = "none";
+    });
+
+    window.addEventListener("pointermove", function (event) {
+      if (!viewChartResizing) return;
+      event.preventDefault();
+      setViewChartHeight(viewChartStartHeight + (event.clientY - viewChartStartY));
+    });
+
+    window.addEventListener("pointerup", function () {
+      if (!viewChartResizing) return;
+      viewChartResizing = false;
+      document.body.style.userSelect = "";
+    });
+
+    window.addEventListener("pointercancel", function () {
+      if (!viewChartResizing) return;
+      viewChartResizing = false;
+      document.body.style.userSelect = "";
+    });
+  }
 
   if (viewChartCanvas) {
     viewChartCanvas.addEventListener("wheel", function (event) {
@@ -1914,7 +2022,6 @@
   }
 
   showNote("Shelly 192.168.178.52 + 192.168.178.53 fest konfiguriert.");
-  hintIfHttpsPage();
   removeLegacyPwaArtifacts();
   setActiveTab("dashboard");
   updateStorageUi();

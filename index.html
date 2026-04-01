@@ -81,16 +81,15 @@
         <section class="chart-panel" aria-live="polite">
           <div class="chart-head">
             <div>
-              <p class="eyebrow chart-eyebrow">History</p>
-              <h2>Verlauf letzte 120 Sekunden</h2>
+              <p class="eyebrow chart-eyebrow">Live-Verlauf 120 Sekunden</p>
             </div>
           </div>
-          <div class="chart-legend" aria-hidden="true">
-            <span class="legend-item"><span class="legend-swatch legend-swatch-load"></span>Verbrauch <span class="legend-value" id="legendLoadValue">-- W</span></span>
-            <span class="legend-item"><span class="legend-swatch legend-swatch-grid"></span>Netzbezug <span class="legend-value" id="legendGridValue">-- W</span></span>
-            <span class="legend-item"><span class="legend-swatch legend-swatch-solar"></span>Solar <span class="legend-value" id="legendSolarValue">-- W</span></span>
+          <div class="live-chart-resize" id="liveChartResize">
+            <canvas id="powerChart" height="260"></canvas>
+            <div class="live-chart-handle" id="liveChartHandle" aria-hidden="true">
+              <span></span>
+            </div>
           </div>
-          <canvas id="powerChart" height="260"></canvas>
         </section>
       </section>
 
@@ -124,7 +123,12 @@
           <span class="legend-item"><span class="legend-swatch legend-swatch-grid"></span>Netzbezug <span class="legend-value" id="viewLegendGridValue">-- W</span></span>
           <span class="legend-item"><span class="legend-swatch legend-swatch-solar"></span>Solar <span class="legend-value" id="viewLegendSolarValue">-- W</span></span>
         </div>
-        <canvas id="viewChart" height="260"></canvas>
+        <div class="view-chart-resize" id="viewChartResize">
+          <canvas id="viewChart" height="260"></canvas>
+          <div class="view-chart-handle" id="viewChartHandle" aria-hidden="true">
+            <span></span>
+          </div>
+        </div>
       </section>
     </main>
     <script src="app.js" defer></script>

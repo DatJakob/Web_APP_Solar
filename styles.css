@@ -310,6 +310,11 @@ body {
   margin-top: 1rem;
 }
 
+.view-metrics-grid {
+  margin-top: 1.35rem;
+  margin-bottom: 1rem;
+}
+
 .power-display {
   margin: 0;
 }
@@ -677,15 +682,91 @@ body {
 
 #powerChart {
   width: 100%;
-  height: 320px;
+  height: 100%;
   display: block;
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
 }
 
+.chart-subsection {
+  margin-top: 1.2rem;
+}
+
+.chart-subsection-head {
+  margin-bottom: 0.7rem;
+}
+
+.chart-subsection-head .chart-eyebrow {
+  margin-bottom: 0;
+}
+
+.energy-chart-wrap {
+  height: 220px;
+}
+
+.live-chart-resize {
+  height: 320px;
+}
+
+.view-chart-resize {
+  height: 320px;
+}
+
+.live-chart-handle {
+  margin-top: 0.65rem;
+  padding: 0.25rem 0 0.05rem;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.view-chart-handle {
+  margin-top: 0.65rem;
+  padding: 0.25rem 0 0.05rem;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.live-chart-handle span {
+  display: block;
+  width: 4.5rem;
+  height: 0.35rem;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: rgba(143, 165, 184, 0.55);
+  box-shadow: 0 0 0 1px rgba(247, 251, 255, 0.06);
+  transition: background 0.2s ease;
+}
+
+.view-chart-handle span {
+  display: block;
+  width: 4.5rem;
+  height: 0.35rem;
+  margin: 0 auto;
+  border-radius: 999px;
+  background: rgba(143, 165, 184, 0.55);
+  box-shadow: 0 0 0 1px rgba(247, 251, 255, 0.06);
+  transition: background 0.2s ease;
+}
+
+.live-chart-handle:hover span {
+  background: rgba(143, 165, 184, 0.82);
+}
+
+.view-chart-handle:hover span {
+  background: rgba(143, 165, 184, 0.82);
+}
+
 #viewChart {
   width: 100%;
-  height: 320px;
+  height: 100%;
+  display: block;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));
+}
+
+#viewEnergyChart {
+  width: 100%;
+  height: 100%;
   display: block;
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.01));

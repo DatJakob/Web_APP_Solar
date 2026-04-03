@@ -7,7 +7,7 @@
     <meta name="theme-color" content="#0f1419" />
     <link rel="stylesheet" href="styles.css" />
   </head>
-  <body>
+  <body data-theme="dark">
     <div class="page-glow page-glow-left" aria-hidden="true"></div>
     <div class="page-glow page-glow-right" aria-hidden="true"></div>
     <main class="wrap">
@@ -20,6 +20,14 @@
           <div class="storage-copy">
             <p class="storage-eyebrow">Verlaufsspeicher</p>
             <p class="storage-meta" id="storageMeta">IndexedDB wird vorbereitet ...</p>
+          </div>
+          <div class="theme-switch" aria-label="Farbschema">
+            <span class="theme-switch-label">Ansicht</span>
+            <div class="theme-switch-options" role="group" aria-label="Theme wechseln">
+              <button type="button" class="theme-option is-active" data-theme-option="dark" aria-pressed="true">Dark</button>
+              <button type="button" class="theme-option" data-theme-option="mid" aria-pressed="false">Soft</button>
+              <button type="button" class="theme-option" data-theme-option="light" aria-pressed="false">White</button>
+            </div>
           </div>
         </div>
 

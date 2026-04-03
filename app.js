@@ -50,6 +50,8 @@
   var historySessionsEl = document.getElementById("historySessions");
   var historyEmptyEl = document.getElementById("historyEmpty");
   var historyStorageUsedEl = document.getElementById("historyStorageUsed");
+  var themeMetaEl = document.querySelector('meta[name="theme-color"]');
+  var themeOptionButtons = Array.prototype.slice.call(document.querySelectorAll("[data-theme-option]"));
   var tabButtons = Array.prototype.slice.call(document.querySelectorAll("[data-tab-target]"));
   var tabPanels = Array.prototype.slice.call(document.querySelectorAll("[data-tab-panel]"));
 
@@ -539,6 +541,45 @@
     if (solarEl) solarEl.textContent = formatSolarLegendValue(stats.solar, stats.avgSolar);
   }
 
+  function getThemeValue(name, fallback) {
+    var value = window.getComputedStyle(document.body).getPropertyValue(name).trim();
+    return value || fallback;
+  }
+
+  function getChartTheme() {
+    return {
+      canvasFill: getThemeValue("--canvas-fill", "rgba(255, 255, 255, 0.03)"),
+      axisText: getThemeValue("--chart-axis-text", "#8b9aab"),
+      gridLine: getThemeValue("--chart-grid-line", "rgba(139, 154, 171, 0.18)"),
+      gridLineSoft: getThemeValue("--chart-grid-line-soft", "rgba(139, 154, 171, 0.12)"),
+      zeroLine: getThemeValue("--chart-zero-line", "rgba(255, 255, 255, 0.32)"),
+      zoneFill: getThemeValue("--chart-zone-fill", "rgba(47, 124, 246, 0.08)"),
+      zoneStroke: getThemeValue("--chart-zone-stroke", "rgba(47, 124, 246, 0.32)"),
+      gridSeries: getThemeValue("--grid", "#ff9f43"),
+      solarSeries: getThemeValue("--solar", "#18a56b"),
+      loadSeries: getThemeValue("--load", "#2f7cf6"),
+      themeColor: getThemeValue("--theme-color", "#0f1419")
+    };
+  }
+
+  function applyTheme(themeName) {
+    var nextTheme = themeName === "light" || themeName === "mid" ? themeName : "dark";
+    document.body.setAttribute("data-theme", nextTheme);
+
+    themeOptionButtons.forEach(function (button) {
+      var isActive = button.getAttribute("data-theme-option") === nextTheme;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    if (themeMetaEl) {
+      themeMetaEl.setAttribute("content", getChartTheme().themeColor);
+    }
+
+    renderChart();
+    renderViewChart();
+  }
+
   function supportsIndexedDb() {
     return typeof window.indexedDB !== "undefined";
   }
@@ -829,6 +870,7 @@
   function renderEnergyChartFromSamples(canvas, samples, options) {
     options = options || {};
     if (!canvas) return;
+    var chartTheme = getChartTheme();
 
     var ctx = resizeCanvasToDisplaySize(canvas);
     if (!ctx) return;
@@ -853,11 +895,11 @@
     var tickValues = [];
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+    ctx.fillStyle = chartTheme.canvasFill;
     ctx.fillRect(0, 0, width, height);
 
     if (!energySamples.length) {
-      ctx.fillStyle = "#8b9aab";
+      ctx.fillStyle = chartTheme.axisText;
       ctx.font = Math.round(14 * (window.devicePixelRatio || 1)) + "px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("Noch keine Energiedaten", width / 2, height / 2);
@@ -892,16 +934,16 @@
     ctx.translate(paddingLeft, paddingTop);
 
     var yZoneWidth = Math.min(plotWidth * 0.22, Math.max(28, VIEW_Y_CONTROL_ZONE_PX * (window.devicePixelRatio || 1)));
-    ctx.fillStyle = "rgba(47, 124, 246, 0.08)";
+    ctx.fillStyle = chartTheme.zoneFill;
     ctx.fillRect(0, 0, yZoneWidth, plotHeight);
-    ctx.strokeStyle = "rgba(47, 124, 246, 0.32)";
+    ctx.strokeStyle = chartTheme.zoneStroke;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(yZoneWidth, 0);
     ctx.lineTo(yZoneWidth, plotHeight);
     ctx.stroke();
 
-    ctx.strokeStyle = "rgba(139, 154, 171, 0.18)";
+    ctx.strokeStyle = chartTheme.gridLine;
     ctx.lineWidth = 1;
     var firstYTick = Math.ceil(minValue / niceStep) * niceStep;
     for (var tickValue = firstYTick; tickValue <= maxValue + (niceStep * 0.5); tickValue += niceStep) {
@@ -916,7 +958,7 @@
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#8b9aab";
+    ctx.fillStyle = chartTheme.axisText;
     ctx.font = Math.round(11 * (window.devicePixelRatio || 1)) + "px sans-serif";
     ctx.textAlign = "left";
     for (i = 0; i < tickValues.length; i += 1) {
@@ -925,14 +967,14 @@
     }
 
     if (endTime === startTime) endTime = startTime + 1;
-    drawSeriesForRange(ctx, plotWidth, plotHeight, energySamples, startTime, endTime, minValue, range, "#ff9f43", "gridImportEnergyWh");
-    drawSeriesForRange(ctx, plotWidth, plotHeight, energySamples, startTime, endTime, minValue, range, "#18a56b", "solarEnergyWh");
-    drawSeriesForRange(ctx, plotWidth, plotHeight, energySamples, startTime, endTime, minValue, range, "#2f7cf6", "loadEnergyWh");
+    drawSeriesForRange(ctx, plotWidth, plotHeight, energySamples, startTime, endTime, minValue, range, chartTheme.gridSeries, "gridImportEnergyWh");
+    drawSeriesForRange(ctx, plotWidth, plotHeight, energySamples, startTime, endTime, minValue, range, chartTheme.solarSeries, "solarEnergyWh");
+    drawSeriesForRange(ctx, plotWidth, plotHeight, energySamples, startTime, endTime, minValue, range, chartTheme.loadSeries, "loadEnergyWh");
 
     if (options.xTickLabels) {
       var xTickStep = Math.max(500, getNiceStep((endTime - startTime) / 6));
-      ctx.strokeStyle = "rgba(139, 154, 171, 0.12)";
-      ctx.fillStyle = "#8b9aab";
+      ctx.strokeStyle = chartTheme.gridLineSoft;
+      ctx.fillStyle = chartTheme.axisText;
       ctx.textAlign = "center";
       var firstXTick = Math.ceil(startTime / xTickStep) * xTickStep;
       for (var t = firstXTick; t <= endTime + (xTickStep * 0.5); t += xTickStep) {
@@ -945,7 +987,7 @@
         ctx.fillText(formatAxisTime(t), x, plotHeight + 18);
       }
     } else {
-      ctx.fillStyle = "#8b9aab";
+      ctx.fillStyle = chartTheme.axisText;
       ctx.textAlign = "left";
       ctx.fillText(options.labelStart || "Start", 0, plotHeight + 18);
       ctx.textAlign = "right";
@@ -1098,6 +1140,7 @@
   function renderChartFromSamples(canvas, samples, legendLoadEl, legendGridEl, legendSunEl, options) {
     options = options || {};
     if (!canvas) return;
+    var chartTheme = getChartTheme();
     var legendStartTime = options.startTime;
     var legendEndTime = options.endTime;
     var showYControlZone = !!options.showYControlZone;
@@ -1124,11 +1167,11 @@
     var plotSamples = getPlotSamplesForTimeRange(samples, startTime, endTime, maxPlotPoints);
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.03)";
+    ctx.fillStyle = chartTheme.canvasFill;
     ctx.fillRect(0, 0, width, height);
 
     if (!plotSamples.length) {
-      ctx.fillStyle = "#8b9aab";
+      ctx.fillStyle = chartTheme.axisText;
       ctx.font = Math.round(14 * (window.devicePixelRatio || 1)) + "px sans-serif";
       ctx.textAlign = "center";
       ctx.fillText("Noch keine Messwerte", width / 2, height / 2);
@@ -1185,9 +1228,9 @@
     if (showYControlZone) {
       // Left control strip for Y-axis interactions (offset/range).
       var yZoneWidth = Math.min(plotWidth * 0.22, Math.max(28, VIEW_Y_CONTROL_ZONE_PX * (window.devicePixelRatio || 1)));
-      ctx.fillStyle = "rgba(47, 124, 246, 0.08)";
+      ctx.fillStyle = chartTheme.zoneFill;
       ctx.fillRect(0, 0, yZoneWidth, plotHeight);
-      ctx.strokeStyle = "rgba(47, 124, 246, 0.32)";
+      ctx.strokeStyle = chartTheme.zoneStroke;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(yZoneWidth, 0);
@@ -1201,7 +1244,7 @@
       tickValues.push(tickValue);
     }
 
-    ctx.strokeStyle = "rgba(139, 154, 171, 0.18)";
+    ctx.strokeStyle = chartTheme.gridLine;
     ctx.lineWidth = 1;
     for (i = 0; i < tickValues.length; i += 1) {
       var tickY = plotHeight - (((tickValues[i] - minValue) / range) * plotHeight);
@@ -1212,14 +1255,14 @@
     }
 
     var zeroY = plotHeight - (((0 - minValue) / range) * plotHeight);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.32)";
+    ctx.strokeStyle = chartTheme.zeroLine;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(0, zeroY);
     ctx.lineTo(plotWidth, zeroY);
     ctx.stroke();
 
-    ctx.fillStyle = "#8b9aab";
+    ctx.fillStyle = chartTheme.axisText;
     ctx.font = Math.round(11 * (window.devicePixelRatio || 1)) + "px sans-serif";
     ctx.textAlign = "left";
     for (i = 0; i < tickValues.length; i += 1) {
@@ -1229,14 +1272,14 @@
     }
 
     if (endTime === startTime) endTime = startTime + 1;
-    drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, "#ff9f43", "netzbezug");
-    drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, "#18a56b", "solar");
-    drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, "#2f7cf6", "verbrauch");
+    drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, chartTheme.gridSeries, "netzbezug");
+    drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, chartTheme.solarSeries, "solar");
+    drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, chartTheme.loadSeries, "verbrauch");
 
     if (options.xTickLabels) {
       var xTickStep = Math.max(500, getNiceStep((endTime - startTime) / 6));
-      ctx.strokeStyle = "rgba(139, 154, 171, 0.12)";
-      ctx.fillStyle = "#8b9aab";
+      ctx.strokeStyle = chartTheme.gridLineSoft;
+      ctx.fillStyle = chartTheme.axisText;
       ctx.textAlign = "center";
       var firstXTick = Math.ceil(startTime / xTickStep) * xTickStep;
       for (var t = firstXTick; t <= endTime + (xTickStep * 0.5); t += xTickStep) {
@@ -1249,7 +1292,7 @@
         ctx.fillText(formatAxisTime(t), x, plotHeight + 18);
       }
     } else {
-      ctx.fillStyle = "#8b9aab";
+      ctx.fillStyle = chartTheme.axisText;
       ctx.textAlign = "left";
       ctx.fillText(options.labelStart || "Start", 0, plotHeight + 18);
       ctx.textAlign = "right";
@@ -2027,6 +2070,12 @@
     connect();
   });
 
+  themeOptionButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      applyTheme(button.getAttribute("data-theme-option"));
+    });
+  });
+
   tabButtons.forEach(function (button) {
     button.addEventListener("click", function () {
       setActiveTab(button.getAttribute("data-tab-target"));
@@ -2535,6 +2584,7 @@
   }
 
   showNote("Shelly 192.168.178.52 + 192.168.178.53 fest konfiguriert.");
+  applyTheme("dark");
   setActiveTab("dashboard");
   updateStorageUi();
   updateHistoryStorageUsageUi(0);

@@ -52,6 +52,7 @@
   var historySessionsEl = document.getElementById("historySessions");
   var historyEmptyEl = document.getElementById("historyEmpty");
   var historyStorageUsedEl = document.getElementById("historyStorageUsed");
+  var historyDataUsedEl = document.getElementById("historyDataUsed");
   var themeMetaEl = document.querySelector('meta[name="theme-color"]');
   var themeOptionButtons = Array.prototype.slice.call(document.querySelectorAll("[data-theme-option]"));
   var samplingModeButtons = Array.prototype.slice.call(document.querySelectorAll("[data-sampling-mode]"));
@@ -86,6 +87,7 @@
   var dataWatchdogTriggered = false;
   var sessionList = [];
   var storageStats = { sessions: 0, samples: 0, lastStart: null };
+  var storageUsageEstimateBytes = null;
   var selectedViewSamples = [];
   var viewWindowMs = HISTORY_WINDOW_MS;
   var viewWindowStart = null;
@@ -281,7 +283,7 @@
   }
 
   function formatLegendValue(currentValue, averageValue) {
-    return formatWatts(currentValue) + " | Avg " + formatWatts(averageValue);
+    return formatWatts(currentValue) + " | Ø " + formatWatts(averageValue);
   }
 
   function formatEnergy(energyWh) {
@@ -395,15 +397,15 @@
   }
 
   function formatViewLoadLegendValue(stats) {
-    return "Avg " + formatWatts(stats.avgLoad) + " | " + formatEnergy(stats.loadEnergyWh);
+    return "Ø " + formatWatts(stats.avgLoad) + " | " + formatEnergy(stats.loadEnergyWh);
   }
 
   function formatViewGridLegendValue(stats) {
-    return "Avg " + formatWatts(stats.avgGrid) + " | +" + formatEnergy(stats.gridImportEnergyWh) + " | -" + formatEnergy(stats.gridExportEnergyWh);
+    return "Ø " + formatWatts(stats.avgGrid) + " | +" + formatEnergy(stats.gridImportEnergyWh) + " | -" + formatEnergy(stats.gridExportEnergyWh);
   }
 
   function formatViewSolarLegendValue(stats) {
-    return "Avg " + formatWatts(stats.avgSolar) + " | " + formatEnergy(stats.solarEnergyWh);
+    return "Ø " + formatWatts(stats.avgSolar) + " | " + formatEnergy(stats.solarEnergyWh);
   }
 
   function updateViewSummaryCards(stats) {
@@ -720,19 +722,158 @@
   function updateStorageUi() {
   }
 
+  function estimateObjectBytes(value) {
+    return new Blob([JSON.stringify(value)]).size;
+  }
+
+  function buildStoredSamplePayload(sessionId, sample) {
+    return {
+      sessionId: sessionId,
+      t: sample.t,
+      netzbezug: sample.netzbezug,
+      solar: sample.solar,
+      verbrauch: sample.verbrauch,
+      netzbezugImportEnergyWh: sample.netzbezugImportEnergyWh,
+      netzbezugExportEnergyWh: sample.netzbezugExportEnergyWh,
+      solarEnergyWh: sample.solarEnergyWh,
+      verbrauchEnergyWh: sample.verbrauchEnergyWh
+    };
+  }
+
+  function estimateSampleStorageBytes(samplePayload) {
+    return estimateObjectBytes(samplePayload);
+  }
+
+  function estimateSessionMetadataBytes(session) {
+    return estimateObjectBytes({
+      startedAt: session.startedAt || null,
+      stoppedAt: session.stoppedAt || null,
+      sampleCount: session.sampleCount || 0,
+      samplingMode: normalizeSamplingMode(session.samplingMode),
+      firstSampleAt: session.firstSampleAt || null,
+      lastSampleAt: session.lastSampleAt || null
+    });
+  }
+
+  function getSessionEstimatedBytes(session) {
+    return Number(session && session.estimatedBytes) || (estimateSessionMetadataBytes(session || {}) + Number(session && session.estimatedSampleBytes || 0));
+  }
+
+  function normalizeSessionRecord(session) {
+    var normalized = Object.assign({}, session || {});
+    normalized.sampleCount = Number(normalized.sampleCount || 0);
+    normalized.samplingMode = normalizeSamplingMode(normalized.samplingMode);
+    normalized.firstSampleAt = normalized.firstSampleAt ? Number(normalized.firstSampleAt) : null;
+    normalized.lastSampleAt = normalized.lastSampleAt ? Number(normalized.lastSampleAt) : null;
+    normalized.estimatedSampleBytes = Number(normalized.estimatedSampleBytes || 0);
+    normalized.estimatedBytes = getSessionEstimatedBytes(normalized);
+    return normalized;
+  }
+
+  function buildSessionRecord(baseData) {
+    var session = normalizeSessionRecord(baseData);
+    session.estimatedBytes = estimateSessionMetadataBytes(session) + Number(session.estimatedSampleBytes || 0);
+    return session;
+  }
+
   function formatBytes(bytes) {
     var value = Number(bytes || 0);
+    if (value >= 1024 * 1024 * 1024) return (value / (1024 * 1024 * 1024)).toFixed(2) + " GB";
     if (value >= 1024 * 1024) return (value / (1024 * 1024)).toFixed(2) + " MB";
     return (value / 1024).toFixed(1) + " KB";
   }
 
-  function updateHistoryStorageUsageUi(totalBytes) {
+  function updateHistoryStorageUsageUi(totalBytes, isEstimate) {
     if (!historyStorageUsedEl) return;
-    historyStorageUsedEl.textContent = "Speicher gesamt: " + formatBytes(totalBytes || 0);
+    if (!isFinite(totalBytes)) {
+      historyStorageUsedEl.textContent = "Browser-Speicher: --";
+      return;
+    }
+    historyStorageUsedEl.textContent = "Browser-Speicher: " + (isEstimate ? "ca. " : "") + formatBytes(totalBytes || 0);
+  }
+
+  function updateHistoryDataUsageUi(totalBytes) {
+    if (!historyDataUsedEl) return;
+    historyDataUsedEl.textContent = "Historie ca.: " + formatBytes(totalBytes || 0);
+  }
+
+  function refreshStorageUsageEstimate(fallbackBytes) {
+    if (!(navigator.storage && typeof navigator.storage.estimate === "function")) {
+      storageUsageEstimateBytes = null;
+      updateHistoryStorageUsageUi(fallbackBytes || 0, true);
+      return Promise.resolve({ usage: null, quota: null });
+    }
+
+    return navigator.storage.estimate().then(function (estimate) {
+      var usage = estimate && typeof estimate.usage === "number" ? estimate.usage : null;
+      storageUsageEstimateBytes = usage;
+      updateHistoryStorageUsageUi(usage !== null ? usage : (fallbackBytes || 0), usage === null);
+      return estimate || { usage: null, quota: null };
+    }).catch(function () {
+      storageUsageEstimateBytes = null;
+      updateHistoryStorageUsageUi(fallbackBytes || 0, true);
+      return { usage: null, quota: null };
+    });
+  }
+
+  function repairSessionMetadata(sessionId) {
+    return openHistoryDb().then(function (db) {
+      return new Promise(function (resolve, reject) {
+        var transaction = db.transaction([SESSIONS_STORE, SAMPLES_STORE], "readwrite");
+        var sessionsStore = transaction.objectStore(SESSIONS_STORE);
+        var samplesStore = transaction.objectStore(SAMPLES_STORE);
+        var sessionRequest = sessionsStore.get(sessionId);
+        var samplesRequest = samplesStore.index("sessionId").getAll(sessionId);
+
+        transaction.oncomplete = function () {
+          var session = sessionRequest.result;
+          var samples = normalizeAndSortSamples(samplesRequest.result || []);
+          if (session) {
+            session = buildSessionRecord({
+              id: session.id,
+              startedAt: session.startedAt,
+              stoppedAt: session.stoppedAt,
+              sampleCount: samples.length,
+              samplingMode: session.samplingMode,
+              firstSampleAt: samples.length ? samples[0].t : null,
+              lastSampleAt: samples.length ? samples[samples.length - 1].t : null,
+              estimatedSampleBytes: samples.reduce(function (sum, sample) {
+                return sum + estimateSampleStorageBytes(buildStoredSamplePayload(sessionId, sample));
+              }, 0)
+            });
+            openHistoryDb().then(function (repairDb) {
+              var repairTransaction = repairDb.transaction(SESSIONS_STORE, "readwrite");
+              repairTransaction.objectStore(SESSIONS_STORE).put(session);
+              repairTransaction.oncomplete = function () { resolve(); };
+              repairTransaction.onerror = function () { reject(repairTransaction.error || new Error("Session-Metadaten konnten nicht gespeichert werden.")); };
+            }).catch(reject);
+            return;
+          }
+          resolve();
+        };
+        transaction.onerror = function () { reject(transaction.error || new Error("Session-Metadaten konnten nicht repariert werden.")); };
+      });
+    });
+  }
+
+  function repairLegacySessionMetadataIfNeeded(sessions) {
+    var sessionIdsToRepair = (sessions || []).filter(function (session) {
+      return !session.firstSampleAt || !session.lastSampleAt || !isFinite(Number(session.estimatedBytes));
+    }).map(function (session) {
+      return session.id;
+    });
+
+    if (!sessionIdsToRepair.length) return Promise.resolve(false);
+
+    return Promise.all(sessionIdsToRepair.map(function (sessionId) {
+      return repairSessionMetadata(sessionId).catch(function () { return null; });
+    })).then(function () {
+      return true;
+    });
   }
 
   function openHistoryDb() {
-    if (!supportsIndexedDb()) return Promise.reject(new Error("IndexedDB wird nicht unterstuetzt."));
+    if (!supportsIndexedDb()) return Promise.reject(new Error("IndexedDB wird nicht unterstützt."));
     if (historyDbPromise) return historyDbPromise;
 
     historyDbPromise = new Promise(function (resolve, reject) {
@@ -812,38 +953,14 @@
   function loadSessions() {
     return openHistoryDb().then(function (db) {
       return new Promise(function (resolve, reject) {
-        var transaction = db.transaction([SESSIONS_STORE, SAMPLES_STORE], "readonly");
+        var transaction = db.transaction(SESSIONS_STORE, "readonly");
         var request = transaction.objectStore(SESSIONS_STORE).getAll();
-        var samplesRequest = transaction.objectStore(SAMPLES_STORE).getAll();
 
         request.onsuccess = function () {
-          sessionList = (request.result || []);
-        };
-        samplesRequest.onsuccess = function () {
-          var samples = samplesRequest.result || [];
-          var samplesBySessionId = {};
-
-          samples.forEach(function (sample) {
-            if (!samplesBySessionId[sample.sessionId]) samplesBySessionId[sample.sessionId] = [];
-            samplesBySessionId[sample.sessionId].push(sample);
-          });
-
-          sessionList = sessionList.map(function (session) {
-            var sessionSamples = normalizeAndSortSamples(samplesBySessionId[session.id] || []);
-            session.sampleCount = sessionSamples.length;
-            session.firstSampleAt = sessionSamples.length ? sessionSamples[0].t : null;
-            session.lastSampleAt = sessionSamples.length ? sessionSamples[sessionSamples.length - 1].t : null;
-            var payloadForSize = {
-              session: {
-                startedAt: session.startedAt,
-                stoppedAt: session.stoppedAt,
-                sampleCount: session.sampleCount
-              },
-              samples: sessionSamples
-            };
-            var approxBytes = new Blob([JSON.stringify(payloadForSize)]).size;
-            session.storageBytes = approxBytes;
-            return session;
+          sessionList = (request.result || []).map(function (session) {
+            var normalizedSession = normalizeSessionRecord(session);
+            normalizedSession.storageBytes = getSessionEstimatedBytes(normalizedSession);
+            return normalizedSession;
           }).sort(function (a, b) {
             return (b.startedAt || 0) - (a.startedAt || 0);
           });
@@ -852,9 +969,18 @@
           var totalBytes = sessionList.reduce(function (sum, session) {
             return sum + Number(session.storageBytes || 0);
           }, 0);
-          updateHistoryStorageUsageUi(totalBytes);
+          updateHistoryDataUsageUi(totalBytes);
+          refreshStorageUsageEstimate(totalBytes);
           renderSessions();
-          resolve(sessionList);
+          repairLegacySessionMetadataIfNeeded(sessionList).then(function (didRepair) {
+            if (!didRepair) {
+              resolve(sessionList);
+              return;
+            }
+            loadSessions().then(resolve).catch(reject);
+          }).catch(function () {
+            resolve(sessionList);
+          });
         };
         transaction.onerror = function () { reject(transaction.error || new Error("Sessions konnten nicht geladen werden.")); };
       });
@@ -874,9 +1000,9 @@
       var isActive = !session.stoppedAt;
       var sampleCount = session.sampleCount || 0;
       var samplingModeLabel = getSamplingModeLabel(session.samplingMode);
-      var stopText = isActive ? "laeuft noch" : formatLongDateTime(session.stoppedAt);
+      var stopText = isActive ? "läuft noch" : formatLongDateTime(session.stoppedAt);
       var durationEnd = session.stoppedAt || session.lastSampleAt;
-      var storageText = formatBytes(session.storageBytes || 0);
+      var storageText = "ca. " + formatBytes(session.storageBytes || 0);
 
       article.className = "session-card";
       article.innerHTML =
@@ -895,7 +1021,7 @@
         '<div class="session-actions">' +
           '<button type="button" class="secondary-action session-action-btn" data-session-view="' + session.id + '"' + (sampleCount ? '' : ' disabled') + '>View</button>' +
           '<button type="button" class="secondary-action session-action-btn session-export" data-session-export="' + session.id + '"' + (sampleCount ? '' : ' disabled') + '>Export</button>' +
-          '<button type="button" class="secondary-action session-action-btn session-delete" data-session-delete="' + session.id + '">Loeschen</button>' +
+          '<button type="button" class="secondary-action session-action-btn session-delete" data-session-delete="' + session.id + '">Löschen</button>' +
         '</div>';
       historySessionsEl.appendChild(article);
     });
@@ -1103,6 +1229,12 @@
       minute: "2-digit",
       second: "2-digit"
     }).format(new Date(timestamp));
+  }
+
+  function formatRelativeAxisOffset(offsetMs) {
+    var seconds = Math.round(Math.abs(Number(offsetMs || 0)) / 1000);
+    if (seconds <= 0) return "jetzt";
+    return "-" + seconds + " s";
   }
 
   function getViewBounds() {
@@ -1378,19 +1510,33 @@
     drawSeriesForRange(ctx, plotWidth, plotHeight, plotSamples, startTime, endTime, minValue, range, chartTheme.loadSeries, "verbrauch");
 
     if (options.xTickLabels) {
+      var xTickValues = Array.isArray(options.xTickValues) && options.xTickValues.length
+        ? options.xTickValues.slice()
+        : null;
       var xTickStep = Math.max(500, getNiceStep((endTime - startTime) / 6));
       ctx.strokeStyle = chartTheme.gridLineSoft;
       ctx.fillStyle = chartTheme.axisText;
       ctx.textAlign = "center";
-      var firstXTick = Math.ceil(startTime / xTickStep) * xTickStep;
-      for (var t = firstXTick; t <= endTime + (xTickStep * 0.5); t += xTickStep) {
+      if (!xTickValues) {
+        xTickValues = [];
+        var firstXTick = Math.ceil(startTime / xTickStep) * xTickStep;
+        for (var autoTick = firstXTick; autoTick <= endTime + (xTickStep * 0.5); autoTick += xTickStep) {
+          xTickValues.push(autoTick);
+        }
+      }
+      for (var tickIndex = 0; tickIndex < xTickValues.length; tickIndex += 1) {
+        var t = xTickValues[tickIndex];
         var x = ((t - startTime) / (endTime - startTime)) * plotWidth;
         if (x < -1 || x > plotWidth + 1) continue;
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, plotHeight);
         ctx.stroke();
-        ctx.fillText(formatAxisTime(t), x, plotHeight + 18);
+        ctx.fillText(
+          typeof options.xTickFormatter === "function" ? options.xTickFormatter(t, startTime, endTime) : formatAxisTime(t),
+          x,
+          plotHeight + 18
+        );
       }
     } else {
       ctx.fillStyle = chartTheme.axisText;
@@ -1403,10 +1549,10 @@
   }
 
   function setViewSessionMeta(session, samples) {
-    if (viewTitleEl) viewTitleEl.textContent = session ? "Abschnitt " + formatShortDateTime(session.startedAt) : "Kein Abschnitt ausgewaehlt";
+    if (viewTitleEl) viewTitleEl.textContent = session ? "Abschnitt " + formatShortDateTime(session.startedAt) : "Kein Abschnitt ausgewählt";
     if (viewSubtitleEl) {
       if (!session) {
-        viewSubtitleEl.textContent = "Waehle in Historie einen Abschnitt oder importiere eine JSON-Datei.";
+        viewSubtitleEl.textContent = "Wähle in Historie einen Abschnitt oder importiere eine JSON-Datei.";
       } else {
         var durationEnd = session.stoppedAt || (samples && samples.length ? samples[samples.length - 1].t : null);
         viewSubtitleEl.textContent = formatDuration(session.startedAt, durationEnd) + " | " + (samples ? samples.length : 0) + " Messpunkte";
@@ -1469,16 +1615,16 @@
         }
         loadStorageStats();
         loadSessions();
-        showNote("Abschnitt wurde geloescht.");
+        showNote("Abschnitt wurde gelöscht.");
       };
-      transaction.onerror = function () { showError("Abschnitt konnte nicht geloescht werden."); };
+      transaction.onerror = function () { showError("Abschnitt konnte nicht gelöscht werden."); };
     }).catch(function (err) {
-      showError("Abschnitt konnte nicht geloescht werden: " + ((err && err.message) || String(err)));
+      showError("Abschnitt konnte nicht gelöscht werden: " + ((err && err.message) || String(err)));
     });
   }
 
   function deleteAllSessions() {
-    if (!confirm("Wirklich alle gespeicherten Sessions und Messwerte loeschen?")) return;
+    if (!confirm("Wirklich alle gespeicherten Sessions und Messwerte löschen?")) return;
 
     openHistoryDb().then(function (db) {
       var transaction = db.transaction([SESSIONS_STORE, SAMPLES_STORE], "readwrite");
@@ -1491,14 +1637,15 @@
         resetViewWindow();
         setViewSessionMeta(null, []);
         renderViewChart();
-        updateHistoryStorageUsageUi(0);
+        updateHistoryDataUsageUi(0);
+        updateHistoryStorageUsageUi(0, true);
         loadStorageStats();
         loadSessions();
-        showNote("Alle Sessions wurden geloescht.");
+        showNote("Alle Sessions wurden gelöscht.");
       };
-      transaction.onerror = function () { showError("Alle Sessions konnten nicht geloescht werden."); };
+      transaction.onerror = function () { showError("Alle Sessions konnten nicht gelöscht werden."); };
     }).catch(function (err) {
-      showError("Alle Sessions konnten nicht geloescht werden: " + ((err && err.message) || String(err)));
+      showError("Alle Sessions konnten nicht gelöscht werden: " + ((err && err.message) || String(err)));
     });
   }
 
@@ -1507,12 +1654,12 @@
     try {
       payload = JSON.parse(jsonText);
     } catch (_) {
-      showError("JSON ist ungueltig.");
+      showError("JSON ist ungültig.");
       return;
     }
 
     if (!payload || !payload.session || !Array.isArray(payload.samples)) {
-      showError("JSON-Format wird nicht unterstuetzt.");
+      showError("JSON-Format wird nicht unterstützt.");
       return;
     }
 
@@ -1520,33 +1667,44 @@
     var stoppedAt = payload.session.stoppedAt ? Number(payload.session.stoppedAt) : null;
     var samplingMode = normalizeSamplingMode(payload.session.samplingMode);
     var normalizedSamples = normalizeAndSortSamples(payload.samples);
+    var firstSampleAt = normalizedSamples.length ? normalizedSamples[0].t : null;
+    var lastSampleAt = normalizedSamples.length ? normalizedSamples[normalizedSamples.length - 1].t : null;
 
     openHistoryDb().then(function (db) {
       var transaction = db.transaction([SESSIONS_STORE, SAMPLES_STORE], "readwrite");
       var sessionStore = transaction.objectStore(SESSIONS_STORE);
       var sampleStore = transaction.objectStore(SAMPLES_STORE);
       var sessionId;
+      var samplePayloads;
 
-        sessionStore.add({
+      sessionStore.add(buildSessionRecord({
+        startedAt: startedAt,
+        stoppedAt: stoppedAt,
+        sampleCount: normalizedSamples.length,
+        samplingMode: samplingMode,
+        firstSampleAt: firstSampleAt,
+        lastSampleAt: lastSampleAt,
+        estimatedSampleBytes: 0
+      })).onsuccess = function (event) {
+        sessionId = event.target.result;
+        samplePayloads = normalizedSamples.map(function (sample) {
+          return buildStoredSamplePayload(sessionId, sample);
+        });
+        normalizedSamples.forEach(function (_, index) {
+          sampleStore.add(samplePayloads[index]);
+        });
+        sessionStore.put(buildSessionRecord({
+          id: sessionId,
           startedAt: startedAt,
           stoppedAt: stoppedAt,
           sampleCount: normalizedSamples.length,
-          samplingMode: samplingMode
-        }).onsuccess = function (event) {
-        sessionId = event.target.result;
-        normalizedSamples.forEach(function (sample) {
-          sampleStore.add({
-            sessionId: sessionId,
-            t: sample.t,
-            netzbezug: sample.netzbezug,
-            solar: sample.solar,
-            verbrauch: sample.verbrauch,
-            netzbezugImportEnergyWh: sample.netzbezugImportEnergyWh,
-            netzbezugExportEnergyWh: sample.netzbezugExportEnergyWh,
-            solarEnergyWh: sample.solarEnergyWh,
-            verbrauchEnergyWh: sample.verbrauchEnergyWh
-          });
-        });
+          samplingMode: samplingMode,
+          firstSampleAt: firstSampleAt,
+          lastSampleAt: lastSampleAt,
+          estimatedSampleBytes: samplePayloads.reduce(function (sum, samplePayload) {
+            return sum + estimateSampleStorageBytes(samplePayload);
+          }, 0)
+        }));
       };
 
       transaction.oncomplete = function () {
@@ -1566,12 +1724,15 @@
     return openHistoryDb().then(function (db) {
       return new Promise(function (resolve, reject) {
         var transaction = db.transaction(SESSIONS_STORE, "readwrite");
-        var request = transaction.objectStore(SESSIONS_STORE).add({
+        var request = transaction.objectStore(SESSIONS_STORE).add(buildSessionRecord({
           startedAt: Date.now(),
           stoppedAt: null,
           sampleCount: 0,
-          samplingMode: historySamplingMode
-        });
+          samplingMode: historySamplingMode,
+          firstSampleAt: null,
+          lastSampleAt: null,
+          estimatedSampleBytes: 0
+        }));
 
         request.onsuccess = function () {
           currentSessionId = request.result;
@@ -1605,7 +1766,7 @@
         var getRequest = store.get(sessionId);
 
         getRequest.onsuccess = function () {
-          var session = getRequest.result;
+          var session = normalizeSessionRecord(getRequest.result);
           if (!session) return;
           session.stoppedAt = Date.now();
           session.sampleCount = Math.max(
@@ -1613,6 +1774,7 @@
             sampleCountBeforeFlush + (flushedPendingSample ? 1 : 0),
             session.sampleCount || 0
           );
+          session.estimatedBytes = estimateSessionMetadataBytes(session) + Number(session.estimatedSampleBytes || 0);
           store.put(session);
         };
         transaction.oncomplete = function () {
@@ -1635,22 +1797,29 @@
   function persistHistoryPoint(sample) {
     if (!currentSessionId) return;
 
-    var payload = {
-      sessionId: currentSessionId,
-      t: sample.t,
-      netzbezug: sample.netzbezug,
-      solar: sample.solar,
-      verbrauch: sample.verbrauch,
-      netzbezugImportEnergyWh: sample.netzbezugImportEnergyWh,
-      netzbezugExportEnergyWh: sample.netzbezugExportEnergyWh,
-      solarEnergyWh: sample.solarEnergyWh,
-      verbrauchEnergyWh: sample.verbrauchEnergyWh
-    };
+    var sessionId = currentSessionId;
+    var payload = buildStoredSamplePayload(sessionId, sample);
+    var sampleBytes = estimateSampleStorageBytes(payload);
 
     openHistoryDb().then(function (db) {
-      var transaction = db.transaction(SAMPLES_STORE, "readwrite");
-      transaction.objectStore(SAMPLES_STORE).add(payload);
-      transaction.oncomplete = function () { currentSessionSampleCount += 1; };
+      var transaction = db.transaction([SESSIONS_STORE, SAMPLES_STORE], "readwrite");
+      var sessionsStore = transaction.objectStore(SESSIONS_STORE);
+      var samplesStore = transaction.objectStore(SAMPLES_STORE);
+      var updatedSampleCount = currentSessionSampleCount + 1;
+
+      samplesStore.add(payload);
+      sessionsStore.get(sessionId).onsuccess = function (event) {
+        var session = normalizeSessionRecord(event.target.result);
+        if (!session) return;
+        session.sampleCount = Math.max(Number(session.sampleCount || 0) + 1, updatedSampleCount);
+        session.firstSampleAt = session.firstSampleAt ? Math.min(session.firstSampleAt, sample.t) : sample.t;
+        session.lastSampleAt = session.lastSampleAt ? Math.max(session.lastSampleAt, sample.t) : sample.t;
+        session.estimatedSampleBytes = Number(session.estimatedSampleBytes || 0) + sampleBytes;
+        session.estimatedBytes = estimateSessionMetadataBytes(session) + Number(session.estimatedSampleBytes || 0);
+        sessionsStore.put(session);
+        updatedSampleCount = session.sampleCount;
+      };
+      transaction.oncomplete = function () { currentSessionSampleCount = Math.max(currentSessionSampleCount, updatedSampleCount); };
       transaction.onerror = function () { appendNote("Verlauf konnte nicht gespeichert werden."); };
     }).catch(function (err) {
       appendNote("Verlauf konnte nicht gespeichert werden: " + ((err && err.message) || String(err)));
@@ -1770,7 +1939,7 @@
 
         exportBlob(blob, filename).then(function (method) {
           if (method === "share") {
-            showNote("Session " + formatShortDateTime(session.startedAt) + " wurde ueber das Teilen-Menue exportiert.");
+            showNote("Session " + formatShortDateTime(session.startedAt) + " wurde über das Teilen-Menü exportiert.");
           } else {
             showNote("Session " + formatShortDateTime(session.startedAt) + " wurde exportiert.");
           }
@@ -1827,12 +1996,24 @@
 
   function renderChart() {
     var now = Date.now();
+    var startTime = now - HISTORY_WINDOW_MS;
+    var liveTickCount = 4;
+    var liveTickStep = HISTORY_WINDOW_MS / liveTickCount;
+    var liveTickValues = [];
+    for (var i = 0; i <= liveTickCount; i += 1) {
+      liveTickValues.push(startTime + (liveTickStep * i));
+    }
     pruneHistory(now);
     renderChartFromSamples(chartCanvas, powerHistory, legendLoadValueEl, legendGridValueEl, legendSolarValueEl, {
-      startTime: now - HISTORY_WINDOW_MS,
+      startTime: startTime,
       endTime: now,
       labelStart: "-120 s",
-      labelEnd: "jetzt"
+      labelEnd: "jetzt",
+      xTickLabels: true,
+      xTickValues: liveTickValues,
+      xTickFormatter: function (tickTime, liveStartTime, liveEndTime) {
+        return formatRelativeAxisOffset(liveEndTime - tickTime);
+      }
     });
   }
 
@@ -2081,7 +2262,7 @@
       setConnectUi(true);
 
       wsConn.addEventListener("open", function () {
-        setOut("Shelly 52 verbunden, request Shelly.GetStatus");
+        setOut("Shelly 52 verbunden, Anfrage Shelly.GetStatus");
         syncGridSamplingTransport();
       });
 
@@ -2713,7 +2894,8 @@
   applySamplingMode(loadSamplingModePreference(), { silent: true });
   setActiveTab("dashboard");
   updateStorageUi();
-  updateHistoryStorageUsageUi(0);
+  updateHistoryDataUsageUi(0);
+  updateHistoryStorageUsageUi(0, true);
   setViewSessionMeta(null, []);
   resetViewWindow();
   renderViewChart();

@@ -827,9 +827,14 @@ body {
 }
 
 .history-storage-usage {
-  margin: 0;
+  display: grid;
+  gap: 0.2rem;
   color: var(--text-soft);
   font-size: 0.9rem;
+}
+
+.history-storage-usage p {
+  margin: 0;
 }
 
 .chart-head {

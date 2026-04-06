@@ -333,38 +333,30 @@ body {
 .toolbar-storage {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 1rem;
   padding: 0.25rem 0;
 }
 
-.storage-copy {
-  min-width: 14rem;
-}
-
-.storage-eyebrow {
-  margin: 0 0 0.35rem;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.storage-meta {
-  margin: 0;
-  color: var(--text-soft);
-  font-size: 0.94rem;
-}
-
-.theme-switch {
+.theme-switch,
+.sampling-switch {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 0.45rem;
 }
 
-.theme-switch-label {
+.theme-switch {
+  margin-left: auto;
+  order: 2;
+}
+
+.sampling-switch {
+  order: 1;
+}
+
+.theme-switch-label,
+.sampling-switch-label {
   font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.14em;
@@ -372,7 +364,8 @@ body {
   color: var(--text-muted);
 }
 
-.theme-switch-options {
+.theme-switch-options,
+.sampling-switch-options {
   display: inline-flex;
   gap: 0.4rem;
   padding: 0.35rem;
@@ -381,7 +374,8 @@ body {
   background: var(--ghost-bg);
 }
 
-.theme-option {
+.theme-option,
+.sampling-option {
   min-width: auto;
   min-height: 2.6rem;
   padding: 0.6rem 1rem;
@@ -395,11 +389,13 @@ body {
   transition: background 160ms ease, color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
 }
 
-.theme-option:hover {
+.theme-option:hover,
+.sampling-option:hover {
   transform: translateY(-1px);
 }
 
-.theme-option.is-active {
+.theme-option.is-active,
+.sampling-option.is-active {
   background: linear-gradient(135deg, #9156ff, #bb86ff);
   color: #f8fbff;
   box-shadow: 0 12px 24px rgba(145, 86, 255, 0.24);
@@ -1035,11 +1031,13 @@ body {
     width: 100%;
   }
 
-  .theme-switch {
+  .theme-switch,
+  .sampling-switch {
     width: 100%;
   }
 
-  .theme-switch-options {
+  .theme-switch-options,
+  .sampling-switch-options {
     width: 100%;
     justify-content: space-between;
   }
@@ -1096,7 +1094,8 @@ body {
     flex-direction: column;
   }
 
-  .theme-switch-options {
+  .theme-switch-options,
+  .sampling-switch-options {
     flex-wrap: wrap;
   }
 }

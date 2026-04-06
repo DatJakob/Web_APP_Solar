@@ -5,8 +5,11 @@
   var WS_WAIT_MS = 15000;
   var HISTORY_WINDOW_MS = 120000;
   var HISTORY_SAMPLE_INTERVAL_MS = 1000;
+  var SHELLY_POLL_INTERVAL_MS = 500;
+  var EVENT_RECORD_DEBOUNCE_MS = 180;
   var DATA_WATCHDOG_TIMEOUT_MS = 15000;
   var DATA_WATCHDOG_CHECK_MS = 2000;
+  var SAMPLING_MODE_STORAGE_KEY = "history-sampling-mode";
   var SHELLY1_BASE_URL = "http://192.168.178.52";
   var SHELLY2_BASE_URL = "http://192.168.178.53";
   var DB_NAME = "shelly-history-db";
@@ -46,12 +49,12 @@
   var viewPowerEnergyLoadEl = document.getElementById("viewPowerEnergyLoad");
   var viewTitleEl = document.getElementById("viewTitle");
   var viewSubtitleEl = document.getElementById("viewSubtitle");
-  var storageMetaEl = document.getElementById("storageMeta");
   var historySessionsEl = document.getElementById("historySessions");
   var historyEmptyEl = document.getElementById("historyEmpty");
   var historyStorageUsedEl = document.getElementById("historyStorageUsed");
   var themeMetaEl = document.querySelector('meta[name="theme-color"]');
   var themeOptionButtons = Array.prototype.slice.call(document.querySelectorAll("[data-theme-option]"));
+  var samplingModeButtons = Array.prototype.slice.call(document.querySelectorAll("[data-sampling-mode]"));
   var tabButtons = Array.prototype.slice.call(document.querySelectorAll("[data-tab-target]"));
   var tabPanels = Array.prototype.slice.call(document.querySelectorAll("[data-tab-panel]"));
 
@@ -76,8 +79,10 @@
   var powerHistory = [];
   var currentSessionId = null;
   var currentSessionSampleCount = 0;
+  var historySamplingMode = "fixed";
   var lastPersistedSampleAt = 0;
   var lastIncomingValueAt = 0;
+  var pendingHistoryRecordTimeoutId = null;
   var dataWatchdogTriggered = false;
   var sessionList = [];
   var storageStats = { sessions: 0, samples: 0, lastStart: null };
@@ -157,6 +162,110 @@
   function setOut(msg) {
     if (!out) return;
     out.textContent = msg || "";
+  }
+
+  function normalizeSamplingMode(mode) {
+    return mode === "event" ? "event" : "fixed";
+  }
+
+  function getSamplingModeLabel(mode) {
+    return normalizeSamplingMode(mode) === "event" ? "Event" : "2 Hz";
+  }
+
+  function loadSamplingModePreference() {
+    try {
+      return normalizeSamplingMode(window.localStorage.getItem(SAMPLING_MODE_STORAGE_KEY));
+    } catch (_) {
+      return "fixed";
+    }
+  }
+
+  function saveSamplingModePreference(mode) {
+    try {
+      window.localStorage.setItem(SAMPLING_MODE_STORAGE_KEY, normalizeSamplingMode(mode));
+    } catch (_) {}
+  }
+
+  function clearPendingHistoryRecord() {
+    if (!pendingHistoryRecordTimeoutId) return;
+    clearTimeout(pendingHistoryRecordTimeoutId);
+    pendingHistoryRecordTimeoutId = null;
+  }
+
+  function flushPendingHistoryRecord() {
+    if (!pendingHistoryRecordTimeoutId) return false;
+    clearPendingHistoryRecord();
+    recordHistoryPoint(true);
+    return true;
+  }
+
+  function sendShellyStatusRequest(connection, sourceId) {
+    if (!connection || connection.readyState !== WebSocket.OPEN) return;
+    connection.send(JSON.stringify({ id: 1, src: sourceId, method: "Shelly.GetStatus" }));
+  }
+
+  function syncGridSamplingTransport() {
+    if (updateIntervalId) {
+      clearInterval(updateIntervalId);
+      updateIntervalId = null;
+    }
+    if (!wsConn || wsConn.readyState !== WebSocket.OPEN) return;
+    sendShellyStatusRequest(wsConn, "user_1");
+    if (historySamplingMode !== "fixed") return;
+    updateIntervalId = setInterval(function () {
+      sendShellyStatusRequest(wsConn, "user_1");
+    }, SHELLY_POLL_INTERVAL_MS);
+  }
+
+  function syncSolarSamplingTransport() {
+    if (updateIntervalId2) {
+      clearInterval(updateIntervalId2);
+      updateIntervalId2 = null;
+    }
+    if (!wsConn2 || wsConn2.readyState !== WebSocket.OPEN) return;
+    sendShellyStatusRequest(wsConn2, "user_2");
+    if (historySamplingMode !== "fixed") return;
+    updateIntervalId2 = setInterval(function () {
+      sendShellyStatusRequest(wsConn2, "user_2");
+    }, SHELLY_POLL_INTERVAL_MS);
+  }
+
+  function syncSamplingTransport() {
+    syncGridSamplingTransport();
+    syncSolarSamplingTransport();
+  }
+
+  function updateSessionSamplingMode(sessionId, mode) {
+    if (!sessionId) return;
+    openHistoryDb().then(function (db) {
+      var transaction = db.transaction(SESSIONS_STORE, "readwrite");
+      var store = transaction.objectStore(SESSIONS_STORE);
+      var request = store.get(sessionId);
+      request.onsuccess = function () {
+        var session = request.result;
+        if (!session) return;
+        session.samplingMode = normalizeSamplingMode(mode);
+        store.put(session);
+      };
+      transaction.oncomplete = function () { loadSessions(); };
+    }).catch(function () {});
+  }
+
+  function applySamplingMode(mode, options) {
+    var nextMode = normalizeSamplingMode(mode);
+    historySamplingMode = nextMode;
+    saveSamplingModePreference(nextMode);
+
+    samplingModeButtons.forEach(function (button) {
+      var isActive = button.getAttribute("data-sampling-mode") === nextMode;
+      button.classList.toggle("is-active", isActive);
+      button.setAttribute("aria-pressed", isActive ? "true" : "false");
+    });
+
+    if (options && options.skipTransportSync) return;
+
+    syncSamplingTransport();
+    if (currentSessionId) updateSessionSamplingMode(currentSessionId, nextMode);
   }
 
   function updateVerbrauch() {
@@ -609,16 +718,6 @@
   }
 
   function updateStorageUi() {
-    if (!storageMetaEl) return;
-
-    if (!supportsIndexedDb()) {
-      storageMetaEl.textContent = "IndexedDB wird von diesem Browser nicht unterstuetzt.";
-    } else if (!storageStats.sessions) {
-      storageMetaEl.textContent = "Noch keine gespeicherten Sessions.";
-    } else {
-      storageMetaEl.textContent = storageStats.sessions + " Sessions mit " + storageStats.samples + " Messpunkten. Letzter Start: " + formatShortDateTime(storageStats.lastStart) + ".";
-    }
-
   }
 
   function formatBytes(bytes) {
@@ -774,6 +873,7 @@
       var article = document.createElement("article");
       var isActive = !session.stoppedAt;
       var sampleCount = session.sampleCount || 0;
+      var samplingModeLabel = getSamplingModeLabel(session.samplingMode);
       var stopText = isActive ? "laeuft noch" : formatLongDateTime(session.stoppedAt);
       var durationEnd = session.stoppedAt || session.lastSampleAt;
       var storageText = formatBytes(session.storageBytes || 0);
@@ -788,6 +888,7 @@
           '<p><span>Start</span><strong>' + formatLongDateTime(session.startedAt) + '</strong></p>' +
           '<p><span>Stop</span><strong>' + stopText + '</strong></p>' +
           '<p><span>Dauer</span><strong>' + formatDuration(session.startedAt, durationEnd) + '</strong></p>' +
+          '<p><span>Modus</span><strong>' + samplingModeLabel + '</strong></p>' +
           '<p><span>Messpunkte</span><strong>' + sampleCount + '</strong></p>' +
           '<p><span>Speicher</span><strong>' + storageText + '</strong></p>' +
         '</div>' +
@@ -1417,6 +1518,7 @@
 
     var startedAt = Number(payload.session.startedAt || Date.now());
     var stoppedAt = payload.session.stoppedAt ? Number(payload.session.stoppedAt) : null;
+    var samplingMode = normalizeSamplingMode(payload.session.samplingMode);
     var normalizedSamples = normalizeAndSortSamples(payload.samples);
 
     openHistoryDb().then(function (db) {
@@ -1428,7 +1530,8 @@
         sessionStore.add({
           startedAt: startedAt,
           stoppedAt: stoppedAt,
-          sampleCount: normalizedSamples.length
+          sampleCount: normalizedSamples.length,
+          samplingMode: samplingMode
         }).onsuccess = function (event) {
         sessionId = event.target.result;
         normalizedSamples.forEach(function (sample) {
@@ -1463,7 +1566,12 @@
     return openHistoryDb().then(function (db) {
       return new Promise(function (resolve, reject) {
         var transaction = db.transaction(SESSIONS_STORE, "readwrite");
-        var request = transaction.objectStore(SESSIONS_STORE).add({ startedAt: Date.now(), stoppedAt: null, sampleCount: 0 });
+        var request = transaction.objectStore(SESSIONS_STORE).add({
+          startedAt: Date.now(),
+          stoppedAt: null,
+          sampleCount: 0,
+          samplingMode: historySamplingMode
+        });
 
         request.onsuccess = function () {
           currentSessionId = request.result;
@@ -1485,6 +1593,8 @@
   function stopCurrentSession() {
     if (!currentSessionId) return Promise.resolve();
 
+    var sampleCountBeforeFlush = currentSessionSampleCount;
+    var flushedPendingSample = flushPendingHistoryRecord();
     var sessionId = currentSessionId;
     currentSessionId = null;
 
@@ -1498,7 +1608,11 @@
           var session = getRequest.result;
           if (!session) return;
           session.stoppedAt = Date.now();
-          session.sampleCount = currentSessionSampleCount || session.sampleCount || 0;
+          session.sampleCount = Math.max(
+            currentSessionSampleCount,
+            sampleCountBeforeFlush + (flushedPendingSample ? 1 : 0),
+            session.sampleCount || 0
+          );
           store.put(session);
         };
         transaction.oncomplete = function () {
@@ -1555,7 +1669,8 @@
         id: session.id,
         startedAt: session.startedAt,
         stoppedAt: session.stoppedAt,
-        sampleCount: session.sampleCount || samples.length
+        sampleCount: session.sampleCount || samples.length,
+        samplingMode: normalizeSamplingMode(session.samplingMode)
       },
       samples: samples.map(function (sample) {
         return {
@@ -1753,11 +1868,11 @@
     renderViewChart();
   }
 
-  function recordHistoryPoint() {
+  function recordHistoryPoint(forcePersist) {
     if (!currentSessionId) return;
 
     var now = Date.now();
-    markIncomingValue();
+    var minPersistIntervalMs = historySamplingMode === "fixed" ? SHELLY_POLL_INTERVAL_MS : HISTORY_SAMPLE_INTERVAL_MS;
     var sample = {
       t: now,
       netzbezug: netzbezug,
@@ -1771,9 +1886,22 @@
     powerHistory.push(sample);
     pruneHistory(now);
     renderChart();
-    if (lastPersistedSampleAt && (now - lastPersistedSampleAt) < HISTORY_SAMPLE_INTERVAL_MS) return;
+    if (!forcePersist && lastPersistedSampleAt && (now - lastPersistedSampleAt) < minPersistIntervalMs) return;
     lastPersistedSampleAt = now;
     persistHistoryPoint(sample);
+  }
+
+  function requestHistoryRecord() {
+    if (!currentSessionId) return;
+    if (historySamplingMode !== "event") {
+      recordHistoryPoint(false);
+      return;
+    }
+    if (pendingHistoryRecordTimeoutId) return;
+    pendingHistoryRecordTimeoutId = setTimeout(function () {
+      pendingHistoryRecordTimeoutId = null;
+      recordHistoryPoint(true);
+    }, EVENT_RECORD_DEBOUNCE_MS);
   }
 
   function normalizeBase(raw) {
@@ -1804,12 +1932,14 @@
       netzbezug = Number(obj.result["em:0"].total_act_power);
       powerValueEl.textContent = netzbezug.toFixed(1);
       updateVerbrauch();
-      recordHistoryPoint();
+      markIncomingValue();
+      requestHistoryRecord();
     } else if (obj.params && obj.params["em:0"] && obj.params["em:0"].total_act_power !== undefined) {
       netzbezug = Number(obj.params["em:0"].total_act_power);
       powerValueEl.textContent = netzbezug.toFixed(1);
       updateVerbrauch();
-      recordHistoryPoint();
+      markIncomingValue();
+      requestHistoryRecord();
     }
 
     if (obj.id == 1 && (obj.result !== undefined || obj.error !== undefined)) {
@@ -1876,6 +2006,7 @@
     clearWaitTimer();
     clearWaitTimer2();
     stopDataWatchdog();
+    flushPendingHistoryRecord();
 
     if (updateIntervalId) {
       clearInterval(updateIntervalId);
@@ -1951,13 +2082,7 @@
 
       wsConn.addEventListener("open", function () {
         setOut("Shelly 52 verbunden, request Shelly.GetStatus");
-        wsConn.send(JSON.stringify({ id: 1, src: "user_1", method: "Shelly.GetStatus" }));
-        clearInterval(updateIntervalId);
-        updateIntervalId = setInterval(function () {
-          if (wsConn && wsConn.readyState === WebSocket.OPEN) {
-            wsConn.send(JSON.stringify({ id: 1, src: "user_1", method: "Shelly.GetStatus" }));
-          }
-        }, 500);
+        syncGridSamplingTransport();
       });
 
       wsConn.addEventListener("message", function (ev) {
@@ -2017,15 +2142,7 @@
 
     wsConn2.addEventListener("open", function () {
       clearWaitTimer2();
-      if (wsConn2 && wsConn2.readyState === WebSocket.OPEN) {
-        wsConn2.send(JSON.stringify({ id: 1, src: "user_2", method: "Shelly.GetStatus" }));
-      }
-      if (updateIntervalId2) clearInterval(updateIntervalId2);
-      updateIntervalId2 = setInterval(function () {
-        if (wsConn2 && wsConn2.readyState === WebSocket.OPEN) {
-          wsConn2.send(JSON.stringify({ id: 1, src: "user_2", method: "Shelly.GetStatus" }));
-        }
-      }, 500);
+      syncSolarSamplingTransport();
     });
 
     wsConn2.addEventListener("message", function (ev) {
@@ -2039,12 +2156,14 @@
           solar = Number(obj.result["pm1:0"].apower);
           powerValueEl2.textContent = solar.toFixed(1);
           updateVerbrauch();
-          recordHistoryPoint();
+          markIncomingValue();
+          requestHistoryRecord();
         } else if (obj.params && obj.params["pm1:0"] && obj.params["pm1:0"].apower !== undefined) {
           solar = Number(obj.params["pm1:0"].apower);
           powerValueEl2.textContent = solar.toFixed(1);
           updateVerbrauch();
-          recordHistoryPoint();
+          markIncomingValue();
+          requestHistoryRecord();
         }
       } catch (_) {}
     });
@@ -2073,6 +2192,12 @@
   themeOptionButtons.forEach(function (button) {
     button.addEventListener("click", function () {
       applyTheme(button.getAttribute("data-theme-option"));
+    });
+  });
+
+  samplingModeButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      applySamplingMode(button.getAttribute("data-sampling-mode"));
     });
   });
 
@@ -2585,6 +2710,7 @@
 
   showNote("Shelly 192.168.178.52 + 192.168.178.53 fest konfiguriert.");
   applyTheme("dark");
+  applySamplingMode(loadSamplingModePreference(), { silent: true });
   setActiveTab("dashboard");
   updateStorageUi();
   updateHistoryStorageUsageUi(0);

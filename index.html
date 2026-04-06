@@ -17,16 +17,17 @@
         </form>
 
         <div class="toolbar-storage">
-          <div class="storage-copy">
-            <p class="storage-eyebrow">Verlaufsspeicher</p>
-            <p class="storage-meta" id="storageMeta">IndexedDB wird vorbereitet ...</p>
-          </div>
           <div class="theme-switch" aria-label="Farbschema">
-            <span class="theme-switch-label">Ansicht</span>
             <div class="theme-switch-options" role="group" aria-label="Theme wechseln">
               <button type="button" class="theme-option is-active" data-theme-option="dark" aria-pressed="true">Dark</button>
               <button type="button" class="theme-option" data-theme-option="dim" aria-pressed="false">Dim</button>
               <button type="button" class="theme-option" data-theme-option="light" aria-pressed="false">Light</button>
+            </div>
+          </div>
+          <div class="sampling-switch" aria-label="Aufzeichnungsmodus">
+            <div class="sampling-switch-options" role="group" aria-label="Historienmodus wechseln">
+              <button type="button" class="sampling-option is-active" data-sampling-mode="fixed" aria-pressed="true">2 Hz</button>
+              <button type="button" class="sampling-option" data-sampling-mode="event" aria-pressed="false">Event</button>
             </div>
           </div>
         </div>
